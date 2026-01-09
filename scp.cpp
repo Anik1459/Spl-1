@@ -130,6 +130,61 @@ void printPackageSummary() {
     cout << string(80, '=') << "\n";
 }
 
+//===== FLOYED-WARSHALL ALGORITHM =====
+void floydWarshallAllPairs(double allPairsDistance[MAX_NODES][MAX_NODES], 
+                            int allPairsNext[MAX_NODES][MAX_NODES]){
+
+    for(int i=0;i<graphNumNodes;i++){
+        for(int j=0;j<graphNumNodes;j++){
+            allPairsDistance[i][j]=graphDistMatrix[i][j];
+            if(i != j && graphDistMatrix[i][j] != INF){
+                allPairsNext[i][j]=j;
+            }
+            else{
+                allPairsNext[i][j]=-1;
+            }
+        }
+    }
+
+     // Floyd-Warshall
+    for (int k = 0; k < graphNumNodes; k++) {
+        for (int i = 0; i < graphNumNodes; i++) {
+            for (int j = 0; j < graphNumNodes; j++) {
+                if (allPairsDistances[i][k] != INF && allPairsDistances[k][j] != INF) {
+                    double newDist = allPairsDistances[i][k] + allPairsDistances[k][j];
+                    if (newDist < allPairsDistances[i][j]) {
+                        allPairsDistances[i][j] = newDist;
+                        allPairsNext[i][j] = allPairsNext[i][k];
+                    }
+                }
+            }
+        }
+    }
+
+}
+void optimieDeliveries(){
+    cout<<"\n==================================================================\n";
+    cout<<"                  STARTING DELIVERY OPTIMIZATION PROCESS            \n"
+
+   cout<<"\n==================================================================\n";
+
+   //Extract unique destinations
+   set<int> uniqueDestinations;
+    for (int i = 0; i < numPackages; i++) {
+        uniqueDestinations.insert(packageDestination[i]);
+    }
+    vector<int>destinations(uniqueDestinations.begin(),uniqueDestinations.end());
+
+    cout<<"Planning routes to "<<destinations.size() << "destination..\n";
+    cout<<"Floyd-Warshall algorithm..\n"
+
+    double allPairsDistance[MAX_NODES][MAX_NODES];
+    int allPairsNext[MAX_NODES][MAX_NODES];
+    floydWarshallAllPairs(allPairsDistances,allPairsNext);
+
+    
+}
+
 void manualNetworkInput() {
     cout << "\n=== MANUAL NETWORK SETUP ===\n\n";
     
