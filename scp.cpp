@@ -1,5 +1,4 @@
 
-
 #include <iostream>
 #include <vector>
 #include <queue>
@@ -41,6 +40,8 @@ int numPackages = 0;
 int packageId[MAX_PACKAGES];
 int packageDestination[MAX_PACKAGES];
 double packageWeight[MAX_PACKAGES];
+
+int depotNode = 0;
 
 void initializeGraph(int numNodes) {
     graphNumNodes = numNodes;
@@ -131,12 +132,12 @@ void printPackageSummary() {
 }
 
 //===== FLOYED-WARSHALL ALGORITHM =====
-void floydWarshallAllPairs(double allPairsDistance[MAX_NODES][MAX_NODES], 
+void floydWarshallAllPairs(double allPairsDistances[MAX_NODES][MAX_NODES], 
                             int allPairsNext[MAX_NODES][MAX_NODES]){
 
     for(int i=0;i<graphNumNodes;i++){
         for(int j=0;j<graphNumNodes;j++){
-            allPairsDistance[i][j]=graphDistMatrix[i][j];
+            allPairsDistances[i][j]=graphDistMatrix[i][j];
             if(i != j && graphDistMatrix[i][j] != INF){
                 allPairsNext[i][j]=j;
             }
@@ -162,9 +163,89 @@ void floydWarshallAllPairs(double allPairsDistance[MAX_NODES][MAX_NODES],
     }
 
 }
+//=====TSP solve using DP Mask
+void tspsolve(int startNode,vector<int>& destinations,vector<vector<double>>& dpTable,
+                vector<vector<int>>& parent ,vector<int>& optimalPath){
+    int n=destinations.size();
+    if(n==0){
+        optimalPath.clear();
+        return;
+    }
+    int maxMask=1 << n;
+    dpTable.resize(graphNumNodes);
+    dpTable.resize(graphNumNodes);
+    for(int i=0;i<graphNumNodes;i++){
+        dpTable[i].assign(maxMask,INF);
+        parent[i].assign(maxMask,-1);
+    }
+
+    dpTable[startNode][0]=0;
+
+    for(int mask =0;mask<maxMask;mask++){
+        for(int u=0;u<graphNumNodes;u++){
+            if(dpTable[u][mask]==INF){
+                continue;
+            }
+            for(int i=0;i<n;i++){
+                if(mask & (1<<i)){
+                    continue;
+                }
+                int v=destinations[i];
+                double dist=graphDistMatrix[u][v];
+                int newMask=mask|(1<<i);
+                if(dpTable[u][mask]+dist <dpTable[v][newMask]){
+                    dpTable[v][newMask]=dpTable[u][mask]+dist;
+                    parent[v][newMask]=u;
+                }
+
+            }
+        }
+    }
+    //find best node that returns to start
+    int fullmask=maxMask-1;
+    int endNode=-1;
+    double minCost=1e9;
+
+    for(int i=0;i<n;i++){
+        int nod=destinations[i];
+        double cost=dpTable[nod][fullmask]+graphDistMatrix[nod][startNode];
+        if(cost<minCost){
+            minCost=cost;
+            endNode=nod;
+        }
+    }
+    //reconstruct path
+    optimalPath.clear();
+    if(endNode==-1){
+        return;
+    }
+    int mask=maxMask-1;
+    int current=endNode;
+    vector<int>reversePath;
+
+    while(mask !=0 && current != -1){
+        reversePath.push_back(current);
+        int prev=parent[current][mask];
+
+        for(int i=0;i<n;i++){
+            if(destinations[i]==current && (mask & (1<<i))){
+                mask ^= (1<<i);
+                break;
+            }
+        }
+        current=prev;
+    }
+
+    optimalPath.push_back(startNode);
+    int sz=reversePath.size();
+    for(int i=sz-1;i>=0;i--){
+        optimalPath.push_back(reversePath[i]);
+    }
+
+}
 void optimieDeliveries(){
     cout<<"\n==================================================================\n";
-    cout<<"                  STARTING DELIVERY OPTIMIZATION PROCESS            \n"
+    cout<<"                  STARTING DELIVERY OPTIMIZATION PROCESS            \n";
 
    cout<<"\n==================================================================\n";
 
@@ -173,14 +254,37 @@ void optimieDeliveries(){
     for (int i = 0; i < numPackages; i++) {
         uniqueDestinations.insert(packageDestination[i]);
     }
-    vector<int>destinations(uniqueDestinations.begin(),uniqueDestinations.end());
+     vector<int>destinations;
+    for(auto dest:uniqueDestinations){
+        destinations.push_back(dest);
+    }
 
     cout<<"Planning routes to "<<destinations.size() << "destination..\n";
-    cout<<"Floyd-Warshall algorithm..\n"
+    cout<<"Floyd-Warshall algorithm..\n";
 
-    double allPairsDistance[MAX_NODES][MAX_NODES];
+    double allPairsDistances[MAX_NODES][MAX_NODES];
     int allPairsNext[MAX_NODES][MAX_NODES];
     floydWarshallAllPairs(allPairsDistances,allPairsNext);
+
+    cout<<"Solving TSP with Dynamic Programming.\n";
+
+    vector<int>optimalPath;
+    int startNode;
+    if (depotNode >= 0 && depotNode < graphNumNodes) {
+    startNode = depotNode;
+    }
+   else {
+    startNode = 0;
+   }
+
+      if (destinations.size() <= 20) {
+        int n = destinations.size();
+        int maxMask = 1 << n;
+        vector<vector<double>> dpTable(MAX_NODES, vector<double>(maxMask));
+        vector<vector<int>> parent(MAX_NODES, vector<int>(maxMask));
+        tspsolve(startNode, destinations, dpTable, parent, optimalPath);
+        
+    }
 
     
 }
