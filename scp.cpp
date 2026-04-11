@@ -6,6 +6,9 @@
 #include <set>
 #include <algorithm>
 #include <string>
+#include <fstream>
+#include <sstream>
+#include <numeric>
 #include<iomanip>
 
 using namespace std;
@@ -41,6 +44,16 @@ int packageDestination[MAX_PACKAGES];
 double packageWeight[MAX_PACKAGES];
 
 int depotNode = 0;
+
+// Stored K-shortest-path results for each target destination
+vector<int> storedTargets;
+vector<vector<vector<int>>> storedKShortestPaths;
+vector<vector<double>> storedKShortestDistances;
+
+// Stored combined (all-destinations) K routes
+vector<vector<int>> storedCombinedTours;
+vector<double> storedCombinedTourCosts;
+vector<vector<int>> storedCombinedExpandedTours;
 
 void initializeGraph(int numNodes) {
     graphNumNodes = numNodes;
@@ -132,7 +145,8 @@ void printPackageSummary() {
 
 //===== FLOYED-WARSHALL ALGORITHM =====
 void floydWarshallAllPairs(double allPairsDistances[MAX_NODES][MAX_NODES], 
-                            int allPairsNext[MAX_NODES][MAX_NODES]){
+                            int allPairsNext[MAX_NODES][MAX_NODES])
+{
 
     for(int i=0;i<graphNumNodes;i++){
         for(int j=0;j<graphNumNodes;j++){
@@ -305,6 +319,18 @@ void dijkstraShortestPaths(int source,double distances[],int previous[])
     }
 }
 
+bool containsCycle(const vector<int>& path)
+{
+    set<int> seen;
+    for (int node : path) {
+        if (seen.count(node)) {
+            return true;
+        }
+        seen.insert(node);
+    }
+    return false;
+}
+
 void yenKShortestPaths(int source,int destination,int k,
                       vector<vector<int>>&kPaths,vector<double>& kDistances)
  {
@@ -388,7 +414,10 @@ void yenKShortestPaths(int source,int destination,int k,
                 {
                     totaldist += graphDistMatrix[totalpath[j]][totalpath[j+1]];
                 }
-                candidatePaths.insert({totaldist,totalpath});
+
+                if (!containsCycle(totalpath)) {
+                    candidatePaths.insert({totaldist,totalpath});
+                }
 
             }
 
@@ -423,6 +452,116 @@ void yenKShortestPaths(int source,int destination,int k,
 
 }
 
+void yenKShortestPathsNoPrint(int source,int destination,int k,
+                      vector<vector<int>>&kPaths,vector<double>& kDistances)
+ {
+
+    kPaths.clear();
+    kDistances.clear();
+
+    double distances[MAX_NODES];
+    int previous[MAX_NODES];
+    dijkstraShortestPaths(source, distances, previous);
+
+    if(distances[destination] == INF)return ;
+
+    vector<int>firstPath;
+    int current=destination;
+    while(current!=-1)
+    {
+        firstPath.push_back(current);
+        current=previous[current];
+
+    }
+    reverse(firstPath.begin(),firstPath.end());
+
+    kPaths.push_back(firstPath);
+    kDistances.push_back(distances[destination]);
+
+    set<pair<double,vector<int>>> candidatePaths;
+
+    for(int k_idx=1;k_idx<k; k_idx++)
+    {
+        vector<int>prevPath=kPaths[k_idx -1] ;
+
+        for(int i=0;i<prevPath.size()-1;i++)
+        {
+
+            int spurNode=prevPath[i];
+            vector<int> rootPath;
+            for (int j = 0; j <= i; j++)
+             {
+                rootPath.push_back(prevPath[j]);
+            }
+
+            map<pair<int, int>, double> removedEdges;
+            
+            for (const auto& path : kPaths) 
+            {
+                if (path.size() > i && equal(rootPath.begin(), rootPath.end(), path.begin())) {
+                    if (i + 1 < path.size())
+                     {
+                        int u = path[i];
+                        int v = path[i + 1];
+                        removedEdges[{u, v}] = graphDistMatrix[u][v];
+                        graphDistMatrix[u][v] = INF;
+                    }
+                }
+            }
+
+            double spurDistances[MAX_NODES];
+            int spurPrevious[MAX_NODES];
+            dijkstraShortestPaths(spurNode,spurDistances,spurPrevious);
+            if(spurDistances[destination] !=INF)
+            {
+                vector<int>spurPath;
+                int curr=destination;
+                while(curr!=-1 && curr!=spurNode)
+                {
+                    spurPath.push_back(curr);
+                    curr=spurPrevious[curr];
+                }
+                spurPath.push_back(spurNode);
+                reverse(spurPath.begin(),spurPath.end());
+
+                vector<int>totalpath=rootPath;
+                for (int j = 1; j < spurPath.size(); j++)
+                {
+                totalpath.push_back(spurPath[j]);
+                }
+                double totaldist=0;
+                for(int j=0;j<totalpath.size()-1;j++)
+                {
+                    totaldist += graphDistMatrix[totalpath[j]][totalpath[j+1]];
+                }
+
+                if (!containsCycle(totalpath)) {
+                    candidatePaths.insert({totaldist,totalpath});
+                }
+
+            }
+
+            for(auto  &edge:removedEdges)
+            {
+                int u=edge.first.first;
+                int v=edge.first.second;
+                double dd=edge.second;
+                graphDistMatrix[u][v]=dd;
+            }
+
+        }
+        if(candidatePaths.empty())
+        {
+            break;
+        }
+
+        auto best=candidatePaths.begin();
+        kPaths.push_back(best->second);
+        kDistances.push_back(best->first);
+        candidatePaths.erase(best);
+    }
+}
+
 
 
 // Rebuilds a node-by-node route using the next-matrix from Floyd–Warshall.
@@ -450,6 +589,163 @@ void expandTourWithNext(const vector<int>& tour,
         }
     }
 }  
+
+double calculateTourDistance(const vector<int>& tour, double distMatrix[MAX_NODES][MAX_NODES])
+{
+    double total = 0;
+    for (int i = 0; i + 1 < (int)tour.size(); i++) {
+        double w = distMatrix[tour[i]][tour[i + 1]];
+        if (w >= INF / 2) return INF;
+        total += w;
+    }
+    return total;
+}
+
+void generateKCombinedRoutesAllDestinations(
+    int startNode,
+    const vector<int>& destinations,
+    int k,
+    double allPairsDistances[MAX_NODES][MAX_NODES],
+    int allPairsNext[MAX_NODES][MAX_NODES],
+    vector<vector<int>>& combinedTours,
+    vector<double>& combinedCosts,
+    vector<vector<int>>& expandedCombinedTours)
+{
+    combinedTours.clear();
+    combinedCosts.clear();
+    expandedCombinedTours.clear();
+
+    vector<int> filteredDestinations;
+    for (int node : destinations) {
+        if (node != startNode) filteredDestinations.push_back(node);
+    }
+
+    if (filteredDestinations.empty()) {
+        vector<int> trivial = {startNode, startNode};
+        combinedTours.push_back(trivial);
+        combinedCosts.push_back(0.0);
+        vector<int> expanded;
+        expandTourWithNext(trivial, allPairsNext, expanded);
+        expandedCombinedTours.push_back(expanded);
+        return;
+    }
+
+    set<pair<double, vector<int>>> rankedTours;
+
+    int n = (int)filteredDestinations.size();
+
+    if (n <= 9) {
+        vector<int> perm = filteredDestinations;
+        sort(perm.begin(), perm.end());
+
+        do {
+            vector<int> tour;
+            tour.push_back(startNode);
+            for (int node : perm) tour.push_back(node);
+            tour.push_back(startNode);
+
+            double cost = calculateTourDistance(tour, allPairsDistances);
+            if (cost < INF / 2) {
+                rankedTours.insert({cost, tour});
+            }
+        } while (next_permutation(perm.begin(), perm.end()));
+    } else {
+        vector<int> tspPath;
+        vector<vector<double>> dpTable;
+        vector<vector<int>> parent;
+        double tspCost = INF;
+
+        vector<int> tempDest = filteredDestinations;
+        tspsolve(startNode, tempDest, dpTable, parent, tspPath, tspCost);
+
+        if (tspCost < INF / 2 && tspPath.size() >= 3) {
+            rankedTours.insert({tspCost, tspPath});
+
+            int m = (int)tspPath.size();
+            for (int i = 1; i <= m - 3; i++) {
+                for (int j = i + 1; j <= m - 2; j++) {
+                    vector<int> swapped = tspPath;
+                    swap(swapped[i], swapped[j]);
+                    double c1 = calculateTourDistance(swapped, allPairsDistances);
+                    if (c1 < INF / 2) rankedTours.insert({c1, swapped});
+
+                    vector<int> reversed = tspPath;
+                    reverse(reversed.begin() + i, reversed.begin() + j + 1);
+                    double c2 = calculateTourDistance(reversed, allPairsDistances);
+                    if (c2 < INF / 2) rankedTours.insert({c2, reversed});
+                }
+            }
+        }
+    }
+
+    int count = 0;
+    for (const auto& item : rankedTours) {
+        if (count >= k) break;
+        combinedTours.push_back(item.second);
+        combinedCosts.push_back(item.first);
+
+        vector<int> expanded;
+        expandTourWithNext(item.second, allPairsNext, expanded);
+        expandedCombinedTours.push_back(expanded);
+        count++;
+    }
+}
+
+bool pathCoversAllDestinations(const vector<int>& path, const vector<int>& destinations, int startNode)
+{
+    set<int> inPath(path.begin(), path.end());
+    for (int d : destinations) {
+        if (d == startNode) continue;
+        if (!inPath.count(d)) return false;
+    }
+    return true;
+}
+
+void generateKCombinedMirroredRoutes(
+    int startNode,
+    const vector<int>& destinations,
+    int k,
+    vector<vector<int>>& combinedTours,
+    vector<double>& combinedCosts,
+    vector<vector<int>>& expandedCombinedTours)
+{
+    combinedTours.clear();
+    combinedCosts.clear();
+    expandedCombinedTours.clear();
+
+    set<pair<double, vector<int>>> candidates;
+    int segmentK = max(10, k * 5);
+
+    for (int target : destinations) {
+        if (target == startNode) continue;
+
+        vector<vector<int>> candidatePaths;
+        vector<double> candidateDists;
+        yenKShortestPathsNoPrint(startNode, target, segmentK, candidatePaths, candidateDists);
+
+        for (int i = 0; i < (int)candidatePaths.size(); i++) {
+            const vector<int>& outward = candidatePaths[i];
+            if (!pathCoversAllDestinations(outward, destinations, startNode)) continue;
+
+            vector<int> mirrored = outward;
+            for (int j = (int)outward.size() - 2; j >= 0; j--) {
+                mirrored.push_back(outward[j]);
+            }
+
+            double totalCost = candidateDists[i] * 2.0;
+            candidates.insert({totalCost, mirrored});
+        }
+    }
+
+    int taken = 0;
+    for (const auto& c : candidates) {
+        if (taken >= k) break;
+        combinedTours.push_back(c.second);
+        combinedCosts.push_back(c.first);
+        expandedCombinedTours.push_back(c.second);
+        taken++;
+    }
+}
 
 void optimieDeliveries(){
     cout<<"\n==================================================================\n";
@@ -499,12 +795,14 @@ void optimieDeliveries(){
 
     vector<int>optimalPath;
     int startNode;
-    if (depotNode >= 0 && depotNode < graphNumNodes) {
+    if (depotNode >= 0 && depotNode < graphNumNodes)
+    {
     startNode = depotNode;
     }
-   else {
+   else
+    {
     startNode = 0;
-   }
+    }
 
       if (destinations.size() <= 20) {
         int n = destinations.size();
@@ -522,7 +820,7 @@ void optimieDeliveries(){
             for (int i = 0; i < optimalPath.size(); i++) {
                 cout << getNodeName(optimalPath[i]);
                 if (i + 1 < optimalPath.size()) {
-                    cout << " -> ";
+                  //  cout << " -> ";
                 }
             }
             cout << "\nTotal distance: " << fixed << setprecision(3) << tourCost << " km\n";
@@ -553,13 +851,59 @@ void optimieDeliveries(){
     }
 
 
-    int targetDestination=destinations[0];
-    vector<vector<int>> yenPaths;
-    vector<double> yenDistances;
-    yenKShortestPaths(startNode, targetDestination, K_SHORTEST_PATHS, yenPaths, yenDistances);
- 
+    if (destinations.empty()) {
+        cout << "No destinations to plan for.\n";
+        return;
+    }
 
-    
+    storedCombinedTours.clear();
+    storedCombinedTourCosts.clear();
+    storedCombinedExpandedTours.clear();
+
+    generateKCombinedMirroredRoutes(
+        startNode,
+        destinations,
+        K_SHORTEST_PATHS,
+        storedCombinedTours,
+        storedCombinedTourCosts,
+        storedCombinedExpandedTours
+    );
+
+    cout << "\nCombined routes (Depot -> All destinations -> Depot):\n";
+    for (int i = 0; i < (int)storedCombinedTours.size(); i++) {
+        cout << "\nCombined Path " << (i + 1) << ": ";
+        for (int j = 0; j < (int)storedCombinedTours[i].size(); j++) {
+            cout << getNodeName(storedCombinedTours[i][j]);
+            if (j + 1 < (int)storedCombinedTours[i].size()) cout << " -> ";
+        }
+        cout << " | Distance: " << fixed << setprecision(3) << storedCombinedTourCosts[i] << " km\n";
+
+        if (!storedCombinedExpandedTours[i].empty()) {
+            cout << "Expanded: ";
+            for (int j = 0; j < (int)storedCombinedExpandedTours[i].size(); j++) {
+                cout << getNodeName(storedCombinedExpandedTours[i][j]);
+                if (j + 1 < (int)storedCombinedExpandedTours[i].size()) cout << " -> ";
+            }
+            cout << "\n";
+        }
+    }
+
+    storedTargets.clear();
+    storedKShortestPaths.clear();
+    storedKShortestDistances.clear() ;
+
+    cout << "\nShortest paths for each destination:\n";
+    for (int targetDestination : destinations) {
+        cout << "\nDestination: " << getNodeName(targetDestination) << "\n";
+        vector<vector<int>> yenPaths;
+        vector<double> yenDistances;
+        yenKShortestPaths(startNode, targetDestination, K_SHORTEST_PATHS, yenPaths, yenDistances);
+
+        storedTargets.push_back(targetDestination);
+        storedKShortestPaths.push_back(yenPaths);
+        storedKShortestDistances.push_back(yenDistances);
+    }
+  
 }
 
 void manualNetworkInput() {
@@ -639,7 +983,8 @@ void manualPackageInput() {
     cin >> numPkgs;
     cin.ignore();
     
-    for (int i = 0; i < numPkgs; i++) {
+    for (int i = 0; i < numPkgs; i++)
+     {
         cout << "--- Package " << (i + 1) << " ---\n";
         
         int destination, fragile;
@@ -659,13 +1004,15 @@ void manualPackageInput() {
         cin.ignore();
 
         
-        if (destination >= 0 && destination < graphNumNodes &&  weight > 0) {
+        if (destination >= 0 && destination < graphNumNodes &&  weight > 0)
+         {
             
             addPackage(i + 1, destination, weight, customerName);
             
             cout << "  [OK] Package added for delivery to " << getNodeName(destination) << "\n";
         } 
-        else {
+        else
+         {
             cout << "  [ERROR] Invalid package data. Skipping.\n";
         }
         cout << "\n";
@@ -674,7 +1021,119 @@ void manualPackageInput() {
     printPackageSummary();
 }
 
-int main(){
+bool loadDataFromFile(const string& fileName)
+{
+    ifstream fin(fileName);
+    if (!fin) 
+    {
+        cout << "[ERROR] Could not open file: " << fileName << "\n";
+        return false;
+    }
+
+    int numNodes;
+    if (!(fin >> numNodes) || numNodes <= 0 || numNodes > MAX_NODES)
+     {
+        cout << "[ERROR] Invalid number of nodes in file.\n";
+        return false;
+    }
+
+    initializeGraph(numNodes);
+    numPackages = 0;
+
+    if (!(fin >> depotNode) || depotNode < 0 || depotNode >= numNodes) 
+    {
+        cout << "[ERROR] Invalid depot node in file. Defaulting to 0.\n";
+        depotNode = 0;
+    }
+
+    string line;
+    getline(fin, line); // consume endline after depot
+
+    for (int i = 0; i < numNodes; i++)
+     {
+        if (!getline(fin, line)) {
+            cout << "[ERROR] Missing city names in file.\n";
+            return false;
+        }
+        if (line.empty()) line = "City_" + to_string(i);
+        setNodeName(i, line);
+    }
+
+    int numRoads;
+    if (!(fin >> numRoads) || numRoads < 0) 
+    {
+        cout << "[ERROR] Invalid number of roads in file.\n";
+        return false;
+    }
+
+    for (int i = 0; i < numRoads; i++) 
+    {
+        int from, to;
+        double distance;
+        if (!(fin >> from >> to >> distance)) 
+        {
+            cout << "[ERROR] Invalid road data in file.\n";
+            return false;
+        }
+        if (from >= 0 && from < graphNumNodes && to >= 0 && to < graphNumNodes && distance > 0)
+         {
+            addBidirectionalEdge(from, to, distance, 0);
+        }
+    }
+
+    int numPkgs;
+    if (!(fin >> numPkgs) || numPkgs < 0)
+     {
+        cout << "[ERROR] Invalid number of packages in file.\n";
+        return false;
+    }
+    getline(fin, line); // consume endline after package count
+
+    for (int i = 0; i < numPkgs; i++)
+     {
+        if (!getline(fin, line)) {
+            cout << "[ERROR] Missing package data in file.\n";
+            return false;
+        }
+        if (line.empty())
+         {
+            i--;
+            continue;
+        }
+
+        stringstream ss(line);
+        int destination;
+        double weight;
+        string customerName;
+
+        if (!(ss >> destination >> weight))
+         {
+            cout << "[ERROR] Invalid package line in file.\n";
+            return false;
+        }
+        getline(ss, customerName);
+        if (!customerName.empty() && customerName[0] == ' ')
+         {
+            customerName.erase(0, 1);
+        }
+        if (customerName.empty())
+         {
+            customerName = "Customer_" + to_string(i + 1);
+        }
+
+        if (destination >= 0 && destination < graphNumNodes && weight > 0)
+         {
+            addPackage(i + 1, destination, weight, customerName);
+        }
+    }
+
+    cout << "[SYSTEM] File loaded successfully.\n";
+    printPackageSummary();
+    return true;
+}
+
+int main()
+{
     cout << "\n" << string(80, '=') << "\n\n";
     cout << "              SMARTCOURIER: ADAPTIVE DELIVERY OPTIMIZER \n";
     cout << "                     \n";
@@ -687,21 +1146,38 @@ int main(){
     
     cout << "Choose setup mode:\n";
     cout << "  [1] Manual Input - Enter your own cities, distances, and packages\n";
+    cout << "  [2] File Input   - Load cities, roads, and packages from a file\n";
 
-    cout << "Enter your choice (1): ";
+    cout << "Enter your choice (1/2): ";
     
     int choice;
     cin >> choice;
     cin.ignore();
     
-    if (choice == 1) {
+    if (choice == 1) 
+    {
         cout << "[MODE] Manual Input Selected\n";
         cout << string(80, '=') << "\n";
         manualNetworkInput();
         manualPackageInput();
         optimieDeliveries();
     } 
+    else if (choice == 2)
+     {
+        cout << "[MODE] File Input Selected\n";
+        cout << string(80, '=') << "\n";
+        cout << "Enter file name (example: input.txt): ";
+        string fileName;
+        getline(cin, fileName);
+        if (fileName.empty()) {
+            getline(cin, fileName);
+        }
+        if (loadDataFromFile(fileName)) {
+            optimieDeliveries();
+        }
+    } else {
+        cout << "[ERROR] Invalid choice.\n";
+    } 
 
 }
-
 
